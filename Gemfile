@@ -73,6 +73,7 @@ gem 'flowdock'
 # GitHub OAuth
 gem 'omniauth-github'
 
+gem 'newrelic_rpm'
 
 platform :ruby do
   gem 'mongo'
