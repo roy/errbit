@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe NoticeObserver do
+describe "Callback on Notice" do
   describe "email notifications (configured individually for each app)" do
     custom_thresholds = [2, 4, 8, 16, 32, 64]
 
@@ -18,11 +18,12 @@ describe NoticeObserver do
       it "sends an email notification after #{threshold} notice(s)" do
         @err.problem.stub(:notices_count).and_return(threshold)
         Mailer.should_receive(:err_notification).
-          and_return(mock('email', :deliver => true))
+          and_return(double('email', :deliver => true))
         Fabricate(:notice, :err => @err)
       end
     end
   end
+
 
   describe "email notifications for a resolved issue" do
     before do
@@ -38,7 +39,14 @@ describe NoticeObserver do
     it "should send email notification after 1 notice since an error has been resolved" do
       @err.problem.resolve!
       Mailer.should_receive(:err_notification).
-        and_return(mock('email', :deliver => true))
+        and_return(double('email', :deliver => true))
+      Fabricate(:notice, :err => @err)
+    end
+    it 'self notify if mailer failed' do
+      @err.problem.resolve!
+      Mailer.should_receive(:err_notification).
+        and_raise(ArgumentError)
+      HoptoadNotifier.should_receive(:notify)
       Fabricate(:notice, :err => @err)
     end
   end
@@ -58,6 +66,30 @@ describe NoticeObserver do
 
     it "should create a campfire notification" do
       app.notification_service.should_receive(:create_notification)
+
+      Notice.create!(:err => err, :message => 'FooError: Too Much Bar', :server_environment => {'environment-name' => 'production'},
+                     :backtrace => backtrace, :notifier => { 'name' => 'Notifier', 'version' => '1', 'url' => 'http://toad.com' })
+    end
+  end
+
+  describe "send a notification if a notification service is configured with defaults but failed" do
+    let(:app) { Fabricate(:app_with_watcher,
+                          :notify_on_errs => true,
+                          :email_at_notices => [1, 100], :notification_service => Fabricate(:campfire_notification_service))}
+    let(:err) { Fabricate(:err, :problem => Fabricate(:problem, :app => app, :notices_count => 99)) }
+    let(:backtrace) { Fabricate(:backtrace) }
+
+    before do
+      Errbit::Config.per_app_email_at_notices = true
+    end
+
+    after do
+      Errbit::Config.per_app_email_at_notices = false
+    end
+
+    it "send email" do
+      app.notification_service.should_receive(:create_notification).and_raise(ArgumentError)
+      Mailer.should_receive(:err_notification).and_return(double(:deliver => true))
 
       Notice.create!(:err => err, :message => 'FooError: Too Much Bar', :server_environment => {'environment-name' => 'production'},
                      :backtrace => backtrace, :notifier => { 'name' => 'Notifier', 'version' => '1', 'url' => 'http://toad.com' })
@@ -103,7 +135,7 @@ describe NoticeObserver do
       Fabricate(:notice, :err => err)
     end
   end
-  
+
   describe "should send a notification at desired intervals" do
     let(:app) { Fabricate(:app, :email_at_notices => [1], :notification_service => Fabricate(:campfire_notification_service, :notify_at_notices => [1,2]))}
     let(:backtrace) { Fabricate(:backtrace) }
